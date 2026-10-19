@@ -36,28 +36,65 @@ struct FullscreenBackdrop: View {
     }
 }
 
+/// Composition guides locked to the video frame: they use the video's own axes
+/// as horizontal/vertical, so they rotate and move exactly with the video.
 struct ReferenceGuides: View {
     @ObservedObject var settings: AppSettings
+    /// Video center in screen coordinates.
+    var videoCenter: CGPoint
+    /// Video size at zero rotation.
+    var videoSize: CGSize
+    /// Rotation applied to the video, in degrees.
+    var angle: Double
+
     var body: some View {
         Canvas { context, size in
+            let radians = angle * .pi / 180
+            // Unit vectors of the video's local axes in screen space.
+            let ux = CGPoint(x: cos(radians), y: sin(radians))
+            let uy = CGPoint(x: -sin(radians), y: cos(radians))
+            // Lines extend well past the screen so rotation never shortens them.
+            let reach = hypot(size.width, size.height) * 2
             var path = Path()
-            func horizontal(_ fraction: CGFloat) {
-                path.move(to: CGPoint(x: 0, y: size.height * fraction))
-                path.addLine(to: CGPoint(x: size.width, y: size.height * fraction))
+            func through(_ point: CGPoint, along direction: CGPoint) {
+                path.move(to: CGPoint(x: point.x - direction.x * reach, y: point.y - direction.y * reach))
+                path.addLine(to: CGPoint(x: point.x + direction.x * reach, y: point.y + direction.y * reach))
             }
-            func vertical(_ fraction: CGFloat) {
-                path.move(to: CGPoint(x: size.width * fraction, y: 0))
-                path.addLine(to: CGPoint(x: size.width * fraction, y: size.height))
+            // A guide parallel to the video's horizontal axis, offset along the video's vertical axis.
+            func horizontal(_ offset: CGFloat) {
+                through(CGPoint(x: videoCenter.x + uy.x * offset, y: videoCenter.y + uy.y * offset), along: ux)
+            }
+            // A guide parallel to the video's vertical axis, offset along the video's horizontal axis.
+            func vertical(_ offset: CGFloat) {
+                through(CGPoint(x: videoCenter.x + ux.x * offset, y: videoCenter.y + ux.y * offset), along: uy)
+            }
+            func rect(width: CGFloat, height: CGFloat) {
+                let hx = width / 2
+                let hy = height / 2
+                let offsets: [(CGFloat, CGFloat)] = [(hx, hy), (-hx, hy), (-hx, -hy), (hx, -hy)]
+                var corners: [CGPoint] = []
+                for (dx, dy) in offsets {
+                    let x = videoCenter.x + ux.x * dx + uy.x * dy
+                    let y = videoCenter.y + ux.y * dx + uy.y * dy
+                    corners.append(CGPoint(x: x, y: y))
+                }
+                path.move(to: corners[0])
+                path.addLine(to: corners[1])
+                path.addLine(to: corners[2])
+                path.addLine(to: corners[3])
+                path.closeSubpath()
             }
             switch settings.guideStyle {
-            case .horizontal: horizontal(0.5)
-            case .cross: horizontal(0.5); vertical(0.5)
-            case .thirds: horizontal(1/3); horizontal(2/3); vertical(1/3); vertical(2/3)
+            case .horizontal: horizontal(0)
+            case .cross: horizontal(0); vertical(0)
+            case .thirds:
+                horizontal(-videoSize.height / 6); horizontal(videoSize.height / 6)
+                vertical(-videoSize.width / 6); vertical(videoSize.width / 6)
             case .square:
-                let side = min(size.width, size.height) * 0.65
-                path.addRect(CGRect(x: (size.width - side) / 2, y: (size.height - side) / 2, width: side, height: side))
+                rect(width: min(videoSize.width, videoSize.height) * 0.65,
+                     height: min(videoSize.width, videoSize.height) * 0.65)
             case .rectangle:
-                path.addRect(CGRect(x: size.width * 0.15, y: size.height * 0.18, width: size.width * 0.7, height: size.height * 0.64))
+                rect(width: videoSize.width * 0.7, height: videoSize.height * 0.64)
             }
             context.stroke(path, with: .color(ScreenColor.color(settings.guideHex).opacity(settings.guideOpacity)),
                            style: StrokeStyle(lineWidth: settings.guideWidth))

@@ -40,7 +40,10 @@ struct PresentationView: View {
                     explicitSize: layout.videoSize, explicitAngle: angle)
                     .position(layout.center)
                 if model.settings.guides {
-                    ReferenceGuides(settings: model.settings)
+                    ReferenceGuides(settings: model.settings,
+                                     videoCenter: layout.center,
+                                     videoSize: layout.videoSize,
+                                     angle: angle)
                         .mask {
                             ZStack {
                                 Color.white

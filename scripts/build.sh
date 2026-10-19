@@ -1,0 +1,22 @@
+#!/bin/bash
+set -euo pipefail
+TASK_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$TASK_ROOT"
+export CLANG_MODULE_CACHE_PATH="$TASK_ROOT/.build/ModuleCache"
+export SWIFTPM_MODULECACHE_OVERRIDE="$TASK_ROOT/.build/ModuleCache"
+TASK_BUILD_FLAGS=(--cache-path "$TASK_ROOT/.build/cache" --config-path "$TASK_ROOT/.build/config" --security-path "$TASK_ROOT/.build/security" --disable-sandbox)
+swift build -c release "${TASK_BUILD_FLAGS[@]}"
+TASK_BIN="$(swift build -c release "${TASK_BUILD_FLAGS[@]}" --show-bin-path)"
+TASK_APP="$TASK_ROOT/build/随视.app"
+mkdir -p "$TASK_APP/Contents/MacOS" "$TASK_APP/Contents/Resources" "$TASK_ROOT/.build/assets"
+cp "$TASK_BIN/EyesToScreen" "$TASK_APP/Contents/MacOS/EyesToScreen.new"
+mv -f "$TASK_APP/Contents/MacOS/EyesToScreen.new" "$TASK_APP/Contents/MacOS/EyesToScreen"
+cp "$TASK_ROOT/Info.plist" "$TASK_APP/Contents/Info.plist"
+swift "$TASK_ROOT/scripts/make-assets.swift" "$TASK_ROOT/.build/assets"
+cp "$TASK_ROOT/.build/assets/AppIcon.icns" "$TASK_APP/Contents/Resources/AppIcon.icns"
+cp "$TASK_ROOT/.build/assets/Example.mov" "$TASK_APP/Contents/Resources/Example.mov"
+codesign --force --sign - --identifier local.fromeyestoscreen.demo "$TASK_APP"
+TASK_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$TASK_APP/Contents/Info.plist")"
+mkdir -p "$TASK_ROOT/build/Symbols"
+xcrun dsymutil "$TASK_BIN/EyesToScreen" -o "$TASK_ROOT/build/Symbols/随视-$TASK_VERSION.dSYM"
+printf '\nBuilt: %s\n' "$TASK_APP"

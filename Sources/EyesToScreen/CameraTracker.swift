@@ -6,6 +6,7 @@ import MotionCore
 struct FaceMeasurement {
     let angle: Double?
     let timestamp: TimeInterval
+    var confidence: Double = 1
 }
 
 final class CameraTracker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
@@ -118,10 +119,12 @@ final class CameraTracker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         guard now - lastFrameTime >= 1.0 / 24 else { return }
         lastFrameTime = now
         let angle: Double?
+        var confidence = 0.0
         do {
             try VNImageRequestHandler(cvPixelBuffer: buffer, orientation: .up).perform([request])
             let face = request.results?.filter { $0.confidence >= 0.6 }
                 .max(by: { $0.boundingBox.width * $0.boundingBox.height < $1.boundingBox.width * $1.boundingBox.height })
+            confidence = Double(face?.confidence ?? 0)
             if let face, let first = center(face.landmarks?.leftEye, in: face.boundingBox),
                let second = center(face.landmarks?.rightEye, in: face.boundingBox) {
                 angle = MotionGeometry.eyeAngle(first: first, second: second,
@@ -129,7 +132,7 @@ final class CameraTracker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             } else { angle = face?.roll.map { $0.doubleValue * 180 / .pi } }
         } catch { angle = nil }
         DispatchQueue.main.async { [weak self] in
-            self?.onMeasurement?(FaceMeasurement(angle: angle, timestamp: now))
+            self?.onMeasurement?(FaceMeasurement(angle: angle, timestamp: now, confidence: confidence))
         }
     }
 

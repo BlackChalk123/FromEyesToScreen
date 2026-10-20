@@ -177,7 +177,7 @@ struct MainView: View {
             HStack {
                 Text(model.isBilibili ? "B 站播放器随画面旋转 · 随视全屏保留跟随效果" : "旋转的是视频画面，控制区始终保持水平。")
                 Spacer()
-                Text(model.isBilibili ? "BILIBILI · v0.5.0" : "LOCAL VIDEO · v0.5.0").font(.system(size: 8, design: .monospaced)).tracking(1)
+                Text(model.isBilibili ? "BILIBILI · v0.6.0" : "LOCAL VIDEO · v0.6.0").font(.system(size: 8, design: .monospaced)).tracking(1)
             }.font(.system(size: 10)).foregroundStyle(Theme.secondary.opacity(0.65)).padding(.bottom, 18)
         }.padding(.horizontal, 30)
     }
@@ -204,6 +204,8 @@ struct MainView: View {
                         container: CGSize(width: max(0, geo.size.width - 48), height: max(0, geo.size.height - 70)))
                         .shadow(color: .black.opacity(0.5), radius: 20, y: 12)
                 } else { emptyStage }
+                SoftCurtain(model: model)
+                if model.settings.cuesEnabled { EdgeMotionCues(model: model) }
                 VStack {
                     HStack {
                         Label("完整画面 · 旋转留白", systemImage: "arrow.up.left.and.arrow.down.right")
@@ -314,6 +316,7 @@ struct MainView: View {
                 HStack(spacing: 12) {
                     Button(model.following ? "暂停跟随" : "恢复跟随") { model.following.toggle() }
                         .disabled(model.manualMode)
+                    Button("手动解锁", action: model.unlockAngle).disabled(!model.canUnlockAngle)
                     Button("回正") { model.resetAngle() }
                 }.buttonStyle(.plain).foregroundStyle(Theme.secondary).font(.system(size: 10))
             }.font(.system(size: 11))

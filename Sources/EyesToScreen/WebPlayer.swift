@@ -20,8 +20,9 @@ final class WebPlayerController: NSObject, ObservableObject, WKNavigationDelegat
         return controller
     }()
 
-    override init() {
-        let configuration = BilibiliWebConfiguration.make()
+    override convenience init() { self.init(configuration: BilibiliWebConfiguration.make()) }
+
+    init(configuration: WKWebViewConfiguration) {
         configuration.userContentController.addUserScript(WKUserScript(source: BilibiliPageLayout.script,
             injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         // Native app fullscreen preserves our rotated viewing surface.

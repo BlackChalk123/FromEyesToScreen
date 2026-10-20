@@ -1,0 +1,99 @@
+{
+  "primitive": {
+    "gray": {
+      "50": "#fdfdfd",
+      "100": "#fafafa",
+      "200": "#dbdbdb",
+      "300": "#bdbdbd",
+      "400": "#9e9e9e",
+      "500": "#808080",
+      "600": "#6a6a6a",
+      "700": "#555555",
+      "800": "#404040",
+      "900": "#2b2b2b",
+      "950": "#181818"
+    }
+  },
+  "semantic": {
+    "surface": "#fafafa",
+    "surface-raised": "#fdfdfd",
+    "surface-sunken": "#f1f1f1",
+    "text": "#181818",
+    "text-secondary": "#555555",
+    "text-muted": "#6a6a6a",
+    "border": "#dbdbdb",
+    "border-strong": "#bdbdbd",
+    "action": "#181818",
+    "action-hover": "#404040",
+    "action-text": "#fafafa",
+    "action-subtle": "#ededed",
+    "canvas": "#e7e7e7",
+    "dark-surface": "#181818",
+    "dark-text": "#fafafa",
+    "dark-secondary": "#bdbdbd",
+    "focus": "#555555"
+  },
+  "spacing": [
+    4,
+    8,
+    12,
+    16,
+    24,
+    32,
+    48,
+    64,
+    96,
+    128
+  ],
+  "type": [
+    12,
+    14,
+    16,
+    18,
+    20,
+    24,
+    30,
+    36
+  ],
+  "fontWeight": [
+    400,
+    600
+  ],
+  "pairs": [
+    {
+      "fg": "#181818",
+      "bg": "#fafafa",
+      "label": "正文"
+    },
+    {
+      "fg": "#555555",
+      "bg": "#fafafa",
+      "label": "次正文"
+    },
+    {
+      "fg": "#6a6a6a",
+      "bg": "#fafafa",
+      "label": "辅助文字"
+    },
+    {
+      "fg": "#fafafa",
+      "bg": "#181818",
+      "label": "主按钮"
+    },
+    {
+      "fg": "#bdbdbd",
+      "bg": "#181818",
+      "label": "深色辅助文字"
+    },
+    {
+      "fg": "#181818",
+      "bg": "#e7e7e7",
+      "label": "观看空间文字"
+    },
+    {
+      "fg": "#555555",
+      "bg": "#e7e7e7",
+      "label": "观看空间辅助文字"
+    }
+  ]
+}

@@ -24,6 +24,8 @@ struct ViewingSurface: View {
         .clipShape(RoundedRectangle(cornerRadius: alwaysFixed ? 0 : 5))
         .overlay(RoundedRectangle(cornerRadius: alwaysFixed ? 0 : 5).stroke(Color.white.opacity(border ? 0.15 : 0), lineWidth: 1))
         .rotationEffect(.degrees(explicitAngle ?? model.displayAngle))
+        .opacity(1 - model.veilOpacity)
+        .allowsHitTesting(model.veilOpacity < 0.01)
     }
 }
 
@@ -39,6 +41,7 @@ struct PresentationView: View {
                 ViewingSurface(model: model, container: geo.size, alwaysFixed: true, border: false,
                     explicitSize: layout.videoSize, explicitAngle: angle)
                     .position(layout.center)
+                SoftCurtain(model: model)
                 if model.settings.guides {
                     ReferenceGuides(settings: model.settings,
                                      videoCenter: layout.center,
@@ -52,8 +55,9 @@ struct PresentationView: View {
                                         .rotationEffect(.degrees(angle)).position(layout.center).blendMode(.destinationOut)
                                 }
                             }.compositingGroup()
-                        }.allowsHitTesting(false).accessibilityHidden(true)
+                        }.opacity((1 - model.veilOpacity) * model.gridVisibility).allowsHitTesting(false).accessibilityHidden(true)
                 }
+                if model.settings.cuesEnabled { EdgeMotionCues(model: model) }
                 VStack {
                     HStack {
                         Spacer()
@@ -68,6 +72,13 @@ struct PresentationView: View {
                                 Button("全屏设置…", action: model.openSettings)
                                 Toggle("透明背景", isOn: Binding(get: { model.settings.transparentBackground }, set: { model.settings.transparentBackground = $0 }))
                                 Toggle("显示引导线", isOn: Binding(get: { model.settings.guides }, set: { model.settings.guides = $0 }))
+                                Menu("观看预设") {
+                                    Button("定姿观看") { model.applyPreset("pose") }
+                                    Button("连续跟随") { model.applyPreset("continuous") }
+                                    ForEach(model.settings.savedPresets) { preset in Button(preset.name) { model.applyPreset(preset.id) } }
+                                }
+                                Button("手动解锁", action: model.unlockAngle).disabled(!model.canUnlockAngle)
+                                Button("锁定当前角度", action: model.lockCurrentAngle).disabled(model.manualMode)
                                 Divider()
                                 Button(model.following ? "冻结当前角度" : "恢复跟随") { model.following.toggle() }
                                     .disabled(model.manualMode)

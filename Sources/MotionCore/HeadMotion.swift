@@ -111,6 +111,9 @@ public struct HeadMotionFilter {
     public var stabilityTolerance = 1.5
     public var unlockTolerance = 4.0
     public var unlockDuration = 0.25
+    public var manualUnlockOnly = false
+    public var compensation = AngleCompensation()
+    public private(set) var didUnlock = false
     public private(set) var isLocked = false
     public var stabilityProgress: Double { min(1, stableTime / max(0.1, lockDuration)) }
     private var sensorAngle: Double?
@@ -130,8 +133,9 @@ public struct HeadMotionFilter {
 
     /// A missing face holds both the current angle and filter target.
     @discardableResult
-    public mutating func update(rawAngle: Double?, deltaTime: Double) -> Double {
-        guard let rawAngle, rawAngle.isFinite else {
+    public mutating func update(rawAngle: Double?, deltaTime: Double, confidence: Double = 1) -> Double {
+        didUnlock = false
+        guard let rawAngle, rawAngle.isFinite, confidence.isFinite, confidence >= 0.7 else {
             candidateAngle = nil
             stableTime = 0
             unlockTime = 0
@@ -149,17 +153,19 @@ public struct HeadMotionFilter {
         let sensed = sensorAngle!
         if !lockingEnabled { cancelLock() }
         if isLocked {
+            guard !manualUnlockOnly else { return angle }
             let releaseThreshold = max(stabilityTolerance + 0.5, unlockTolerance)
             if abs(sensed - lockedHeadAngle) > releaseThreshold && abs(measured - lockedHeadAngle) > releaseThreshold {
                 unlockTime += decisionTime
             } else { unlockTime = 0 }
             guard unlockTime >= max(0.05, unlockDuration) else { return angle }
             isLocked = false
+            didUnlock = true
             unlockTime = 0
             stableTime = 0
             candidateAngle = sensed
         }
-        let bounded = max(-limit, min(limit, measured * gain))
+        let bounded = desiredAngle(rawAngle: rawAngle)
         if abs(bounded - target) >= deadband { target = bounded }
         let step = maximumSpeed.isFinite ? max(0, maximumSpeed) * dt : Double.infinity
         angle += max(-step, min(step, alpha * (target - angle)))
@@ -172,7 +178,7 @@ public struct HeadMotionFilter {
                 candidateAngle = sensed
                 stableTime = 0
             }
-            if stableTime >= max(0.1, lockDuration) {
+            if stableTime >= max(0.1, lockDuration) && abs(angle - bounded) <= 0.2 {
                 isLocked = true
                 lockedHeadAngle = sensed
                 target = angle
@@ -188,11 +194,11 @@ public struct HeadMotionFilter {
         cancelLock()
     }
 
-    public mutating func hold(angle: Double) {
+    public mutating func hold(angle: Double, preservingLock: Bool = false) {
         guard angle.isFinite else { return }
         self.angle = max(-limit, min(limit, angle))
         target = self.angle
-        cancelLock()
+        if !preservingLock { cancelLock() }
     }
 
     public mutating func cancelLock() {
@@ -201,5 +207,20 @@ public struct HeadMotionFilter {
         stableTime = 0
         unlockTime = 0
         sensorAngle = nil
+    }
+
+    public func desiredAngle(rawAngle: Double) -> Double {
+        let measured = (rawAngle - baseline) * (reversed ? -1 : 1) * gain
+        return max(-limit, min(limit, compensation.correct(measured)))
+    }
+
+    public mutating func unlock() { cancelLock() }
+
+    public mutating func lock(rawAngle: Double) {
+        guard rawAngle.isFinite else { return }
+        cancelLock()
+        lockedHeadAngle = (rawAngle - baseline) * (reversed ? -1 : 1)
+        isLocked = true
+        target = angle
     }
 }

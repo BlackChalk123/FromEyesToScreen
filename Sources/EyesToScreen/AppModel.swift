@@ -9,7 +9,7 @@ import MediaCore
 final class AppModel: ObservableObject {
     let player = AVPlayer()
     let camera = CameraTracker()
-    let webPlayer = WebPlayerController()
+    let webPlayer: WebPlayerController
     let settings: AppSettings
     let viewingWindows = ViewingWindowController()
     @Published var showingSettings = false
@@ -40,9 +40,20 @@ final class AppModel: ObservableObject {
     @Published var cameraMessage = "摄像头已关闭"
     @Published var faceVisible = false
     @Published var rawAngle: Double?
+    @Published var veilOpacity = 0.0
+    @Published var cuePhase = 0.0
+    @Published var cueVelocity = 0.0
+    @Published var gridVisibility = 1.0
     @Published var displayAngle = 0.0
     @Published var following = true {
-        didSet { if !following { filter.cancelLock(); syncLockStatus() } }
+        didSet {
+            if !following {
+                filter.hold(angle: displayAngle)
+                visualTarget = displayAngle; relocationTarget = displayAngle
+                rotation.reset(to: displayAngle)
+                syncLockStatus()
+            }
+        }
     }
     @Published var manualMode = false
     @Published var manualAngle = 0.0
@@ -62,6 +73,19 @@ final class AppModel: ObservableObject {
     private var linkTask: Task<Void, Never>?
     private var settingsSubscription: AnyCancellable?
     private var trackingConfiguration: [Double] = []
+    private var rotation = RotationTransition()
+    private var cues = EdgeMotionFilter()
+    private var gridMotion = MotionReferenceVisibility()
+    private var visualTarget = 0.0
+    private var relocationTarget = 0.0
+    private var sampleTimestamp = 0.0
+    private var lastVisualTick = 0.0
+    private var visualTimer: Timer?
+    private var settingsUpdateScheduled = false
+    private var cueGeometry: [Double] = []
+    var transitionPhase: RotationTransition.Phase { rotation.phase }
+    var canUnlockAngle: Bool { !manualMode && (isAngleLocked || !following) }
+
 
     var hasContent: Bool { videoURL != nil || bilibiliLink != nil }
     var isBilibili: Bool { bilibiliLink != nil }
@@ -77,16 +101,21 @@ final class AppModel: ObservableObject {
         return "正在跟随"
     }
 
-    init(settings: AppSettings = AppSettings()) {
+    init(settings: AppSettings = AppSettings(), webPlayer: WebPlayerController? = nil) {
         self.settings = settings
+        self.webPlayer = webPlayer ?? WebPlayerController()
         applySettings()
         loadBackgroundImage()
         settingsSubscription = settings.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.applySettings()
-                self?.loadBackgroundImage()
-                self?.viewingWindows.updateAppearance()
-                self?.objectWillChange.send()
+            guard let self, !self.settingsUpdateScheduled else { return }
+            self.settingsUpdateScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.settingsUpdateScheduled = false
+                self.applySettings()
+                self.loadBackgroundImage()
+                self.viewingWindows.updateAppearance()
+                self.objectWillChange.send()
             }
         }
         player.volume = Float(volume)
@@ -112,10 +141,18 @@ final class AppModel: ObservableObject {
                 self.rawAngle = nil
                 self.lastMeasurement = 0
                 self.filter.cancelLock()
+                self.visualTarget = self.displayAngle; self.relocationTarget = self.displayAngle
+                self.sampleTimestamp = 0
+                self.rotation.reset(to: self.displayAngle)
                 self.syncLockStatus()
             }
         }
         camera.onMeasurement = { [weak self] measurement in self?.receive(measurement) }
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.advanceVisuals() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        visualTimer = timer
     }
 
     func importVideo() {
@@ -235,6 +272,9 @@ final class AppModel: ObservableObject {
         filter.cancelLock()
         syncLockStatus()
         manualMode = enabled
+        rotation.reset(to: displayAngle)
+        visualTarget = displayAngle; relocationTarget = displayAngle
+        sampleTimestamp = 0
         if enabled {
             cameraRequested = false
             cameraRunning = false
@@ -252,13 +292,15 @@ final class AppModel: ObservableObject {
     func setManualAngle(_ angle: Double) {
         let bounded = max(-settings.rotationLimit, min(settings.rotationLimit, angle))
         manualAngle = bounded
-        displayAngle = bounded
+        let corrected = compensation.correct(bounded)
+        visualTarget = corrected; relocationTarget = corrected
     }
 
     func calibrate() {
         if manualMode { setManualAngle(0); return }
         guard let rawAngle, faceVisible, cameraRunning else { return }
         filter.calibrate(rawAngle: rawAngle)
+        rotation.cancel()
         syncLockStatus()
         following = true
         calibrationMessage = "已将当前坐姿设为水平"
@@ -269,6 +311,8 @@ final class AppModel: ObservableObject {
         filter.reset()
         syncLockStatus()
         displayAngle = 0
+        rotation.reset(to: 0)
+        visualTarget = 0; relocationTarget = 0
         manualAngle = 0
         following = false
         calibrationMessage = "已回正 · 恢复跟随后重新随头部转动"
@@ -276,15 +320,106 @@ final class AppModel: ObservableObject {
 
     private func receive(_ measurement: FaceMeasurement) {
         guard cameraRequested, cameraRunning, !manualMode else { return }
-        faceVisible = measurement.angle != nil
-        rawAngle = measurement.angle
+        let validAngle = measurement.confidence.isFinite && measurement.confidence >= 0.7 ? measurement.angle.flatMap { $0.isFinite ? $0 : nil } : nil
+        faceVisible = validAngle != nil
+        rawAngle = validAngle
         let dt = lastMeasurement > 0 ? measurement.timestamp - lastMeasurement : 1.0 / 24
         lastMeasurement = measurement.timestamp
+        sampleTimestamp = validAngle != nil ? measurement.timestamp : 0
         guard following else { return }
-        displayAngle = filter.update(rawAngle: measurement.angle, deltaTime: dt)
+        visualTarget = filter.update(rawAngle: validAngle, deltaTime: dt, confidence: measurement.confidence)
+        relocationTarget = filter.isLocked ? filter.angle : validAngle.map { filter.desiredAngle(rawAngle: $0) } ?? filter.angle
+        if validAngle == nil {
+            filter.hold(angle: displayAngle, preservingLock: true)
+            visualTarget = displayAngle; relocationTarget = displayAngle
+            rotation.reset(to: displayAngle)
+        }
         syncLockStatus()
-        let status = !faceVisible ? "未检测到人脸，保持当前角度" : isAngleLocked ? "姿势稳定 · 明显转头后恢复跟随" : "正在本机识别头部角度"
+        let status = !faceVisible ? "未检测到可靠人脸，保持当前角度" : isAngleLocked ?
+            (settings.manualUnlockOnly ? "姿势已锁定 · 点击手动解锁调整" : "姿势已锁定 · 大幅持续偏转或手动解锁") : "正在本机识别头部角度"
         if cameraMessage != status { cameraMessage = status }
+    }
+
+    var compensation: AngleCompensation {
+        var c = AngleCompensation()
+        c.enabled = settings.compensationEnabled; c.threshold = settings.compensationThreshold
+        c.left = settings.compensationLeft; c.right = settings.compensationRight; c.blendWidth = settings.compensationBlend
+        return c
+    }
+
+    func unlockAngle() {
+        guard !manualMode else { return }
+        following = true
+        filter.hold(angle: displayAngle)
+        filter.unlock()
+        rotation.reset(to: displayAngle)
+        visualTarget = displayAngle; relocationTarget = displayAngle
+        sampleTimestamp = 0
+        syncLockStatus()
+    }
+
+    func lockCurrentAngle() {
+        guard !manualMode else { return }
+        if settings.autoLock, let rawAngle, faceVisible, cameraRunning {
+            following = true
+            filter.hold(angle: displayAngle)
+            filter.lock(rawAngle: rawAngle)
+            visualTarget = displayAngle; relocationTarget = displayAngle
+            rotation.reset(to: displayAngle)
+            syncLockStatus()
+        } else { following = false }
+    }
+
+    func applyPreset(_ id: String) {
+        settings.applyPreset(id: id)
+        applySettings()
+        unlockAngle()
+        cues.reset(angle: renderedAngle(displayAngle))
+    }
+
+    private func renderedAngle(_ angle: Double) -> Double {
+        if viewingMode == .fullscreen && fullscreenViewport.width > 0 { return fullscreenLayout(in: fullscreenViewport).angle(angle) }
+        return max(-settings.rotationLimit, min(settings.rotationLimit, angle))
+    }
+
+    func advanceVisuals(now: Double = ProcessInfo.processInfo.systemUptime) {
+        let dt = lastVisualTick > 0 ? now - lastVisualTick : 1.0 / 60
+        lastVisualTick = now
+        guard dt > 0 else { return }
+        guard cameraRunning || manualMode || veilOpacity > 0 || gridVisibility < 1 || abs(cueVelocity) > 0.01 else { return }
+        var config = CurtainConfiguration()
+        config.enabled = settings.curtainEnabled && following
+        config.threshold = settings.curtainThreshold; config.confirmation = settings.curtainConfirmation
+        config.fadeOut = settings.curtainFadeOut; config.covered = settings.curtainCovered
+        config.fadeIn = settings.curtainFadeIn; config.minimumVisible = settings.curtainInterval
+        config.maximumSpeed = settings.maximumSpeed
+        let fresh = manualMode || (following && cameraRunning && faceVisible && now - sampleTimestamp >= 0 && now - sampleTimestamp < 0.25)
+        let target = manualMode ? compensation.correct(manualAngle) : visualTarget
+        let previousPhase = rotation.phase
+        rotation.step(target: fresh ? renderedAngle(target) : displayAngle, relocation: fresh ? renderedAngle(manualMode ? target : relocationTarget) : displayAngle,
+                      fresh: fresh, deltaTime: dt, configuration: config)
+        if !manualMode && ((previousPhase == .fadingOut && rotation.phase == .covered) ||
+                           (previousPhase == .covered && rotation.phase == .fadingIn)) {
+            // The concealed turn bypasses the normal slow follower. Rebase it to
+            // the accepted pose so it cannot pull the video backwards on reveal.
+            filter.hold(angle: relocationTarget)
+            visualTarget = filter.angle
+            syncLockStatus()
+        }
+        let actual = renderedAngle(rotation.angle)
+        gridMotion.step(angle: actual, deltaTime: dt, enabled: settings.gridFadeOnMotion)
+        if abs(gridMotion.opacity - gridVisibility) > 0.00001 { gridVisibility = gridMotion.opacity }
+        if abs(actual - displayAngle) > 0.00001 { displayAngle = actual }
+        if rotation.opacity != veilOpacity && (abs(rotation.opacity - veilOpacity) > 0.00001 || rotation.opacity == 0 || rotation.opacity == 1) { veilOpacity = rotation.opacity }
+        let geometry = [viewingMode == .fullscreen ? 1.0 : 0, Double(fullscreenViewport.width), Double(fullscreenViewport.height),
+            settings.fullscreenScale, Double(viewingPosition.x), Double(viewingPosition.y), videoAspect, settings.boundary == .crop ? 1 : 0]
+        if geometry != cueGeometry { cues.reset(angle: actual); cueGeometry = geometry }
+        if settings.cuesEnabled && hasContent {
+            cues.step(angle: actual, deltaTime: dt, strength: settings.cueStrength,
+                      maximumSpeed: settings.cueMaximumSpeed, visible: veilOpacity < 0.01)
+        } else { cues.reset(angle: actual) }
+        if abs(cues.phase - cuePhase) > 0.00001 { cuePhase = cues.phase }
+        if abs(cues.velocity - cueVelocity) > 0.00001 { cueVelocity = cues.velocity }
     }
 
     private func syncLockStatus() {
@@ -295,9 +430,11 @@ final class AppModel: ObservableObject {
     private func applySettings() {
         let configuration = [settings.responseTime, settings.reversed ? 1 : 0, settings.autoLock ? 1 : 0,
                              settings.lockDuration, settings.stabilityTolerance, settings.unlockTolerance, settings.rotationLimit,
-                             settings.followGain, settings.maximumSpeed]
+                             settings.followGain, settings.maximumSpeed, settings.manualUnlockOnly ? 1 : 0, settings.unlockDuration,
+                             settings.compensationEnabled ? 1 : 0, settings.compensationThreshold, settings.compensationLeft,
+                             settings.compensationRight, settings.compensationBlend]
         if trackingConfiguration != configuration {
-            filter.cancelLock()
+            if !filter.isLocked || !settings.autoLock { filter.cancelLock() }
             trackingConfiguration = configuration
         }
         filter.responseTime = settings.responseTime
@@ -309,6 +446,9 @@ final class AppModel: ObservableObject {
         filter.limit = settings.rotationLimit
         filter.gain = settings.followGain
         filter.maximumSpeed = settings.maximumSpeed
+        filter.manualUnlockOnly = settings.manualUnlockOnly
+        filter.unlockDuration = settings.unlockDuration
+        filter.compensation = compensation
         let bounded = max(-filter.limit, min(filter.limit, displayAngle))
         if bounded != displayAngle { filter.hold(angle: bounded); displayAngle = bounded; manualAngle = bounded }
         syncLockStatus()
@@ -328,6 +468,8 @@ final class AppModel: ObservableObject {
     }
 
     func shutdown() {
+        visualTimer?.invalidate()
+        visualTimer = nil
         viewingWindows.dismiss()
         loadID = UUID()
         cancelBilibiliResolution()

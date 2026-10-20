@@ -1,0 +1,43 @@
+/* 无彩色界面：全部语义色为零饱和度。gray ramp 由 Refactoring UI palette 脚本生成。 */
+:root {
+  --gray-50: #fdfdfd;
+  --gray-100: #fafafa;
+  --gray-200: #dbdbdb;
+  --gray-300: #bdbdbd;
+  --gray-400: #9e9e9e;
+  --gray-500: #808080;
+  --gray-600: #6a6a6a;
+  --gray-700: #555555;
+  --gray-800: #404040;
+  --gray-900: #2b2b2b;
+  --gray-950: #181818;
+  --surface: #fafafa;
+  --surface-raised: #fdfdfd;
+  --surface-sunken: #f1f1f1;
+  --text: #181818;
+  --text-secondary: #555555;
+  --text-muted: #6a6a6a;
+  --border: #dbdbdb;
+  --border-strong: #bdbdbd;
+  --action: #181818;
+  --action-hover: #404040;
+  --action-text: #fafafa;
+  --action-subtle: #ededed;
+  --canvas: #e7e7e7;
+  --dark-surface: #181818;
+  --dark-text: #fafafa;
+  --dark-secondary: #bdbdbd;
+  --focus: #555555;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --mono: "SFMono-Regular", Consolas, monospace;
+  --text-xs: 12px; --text-sm: 14px; --text-md: 16px; --text-lg: 18px;
+  --text-xl: 20px; --text-2xl: 24px; --text-3xl: 30px; --text-4xl: 36px;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-6: 24px; --space-8: 32px; --space-12: 48px; --space-16: 64px; --space-24: 96px;
+  --radius-sm: 8px; --radius-md: 12px; --radius-lg: 16px; --radius-xl: 24px; --radius-pill: 999px;
+  --shadow-1: 0 1px 3px #00000014; --shadow-2: 0 4px 6px #00000014;
+  --shadow-3: 0 5px 15px #0000001f; --shadow-4: 0 10px 24px #00000024;
+  --shadow-5: 0 15px 35px #00000033;
+  --z-base: 0; --z-dropdown: 10; --z-sticky: 20; --z-overlay: 30; --z-modal: 40; --z-toast: 60;
+  --motion-ui: 180ms; --opacity-disabled: .4;
+}

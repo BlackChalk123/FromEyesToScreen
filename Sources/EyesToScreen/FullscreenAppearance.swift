@@ -36,68 +36,62 @@ struct FullscreenBackdrop: View {
     }
 }
 
-/// Composition guides locked to the video frame: they use the video's own axes
-/// as horizontal/vertical, so they rotate and move exactly with the video.
+/// One configurable square grid. Preserve the existing video-axis attachment;
+/// users may also choose a fixed screen reference.
 struct ReferenceGuides: View {
     @ObservedObject var settings: AppSettings
-    /// Video center in screen coordinates.
     var videoCenter: CGPoint
-    /// Video size at zero rotation.
     var videoSize: CGSize
-    /// Rotation applied to the video, in degrees.
     var angle: Double
-
     var body: some View {
         Canvas { context, size in
-            let radians = angle * .pi / 180
-            // Unit vectors of the video's local axes in screen space.
+            let radians = (settings.gridFollowsVideo ? angle : 0) * .pi / 180
+            let origin = settings.gridFollowsVideo ? videoCenter : CGPoint(x: size.width / 2, y: size.height / 2)
             let ux = CGPoint(x: cos(radians), y: sin(radians))
             let uy = CGPoint(x: -sin(radians), y: cos(radians))
-            // Lines extend well past the screen so rotation never shortens them.
             let reach = hypot(size.width, size.height) * 2
+            let spacing = max(24, min(180, settings.gridSpacing))
+            let count = Int(ceil(reach / spacing))
             var path = Path()
-            func through(_ point: CGPoint, along direction: CGPoint) {
+            func line(_ point: CGPoint, _ direction: CGPoint) {
                 path.move(to: CGPoint(x: point.x - direction.x * reach, y: point.y - direction.y * reach))
                 path.addLine(to: CGPoint(x: point.x + direction.x * reach, y: point.y + direction.y * reach))
             }
-            // A guide parallel to the video's horizontal axis, offset along the video's vertical axis.
-            func horizontal(_ offset: CGFloat) {
-                through(CGPoint(x: videoCenter.x + uy.x * offset, y: videoCenter.y + uy.y * offset), along: ux)
-            }
-            // A guide parallel to the video's vertical axis, offset along the video's horizontal axis.
-            func vertical(_ offset: CGFloat) {
-                through(CGPoint(x: videoCenter.x + ux.x * offset, y: videoCenter.y + ux.y * offset), along: uy)
-            }
-            func rect(width: CGFloat, height: CGFloat) {
-                let hx = width / 2
-                let hy = height / 2
-                let offsets: [(CGFloat, CGFloat)] = [(hx, hy), (-hx, hy), (-hx, -hy), (hx, -hy)]
-                var corners: [CGPoint] = []
-                for (dx, dy) in offsets {
-                    let x = videoCenter.x + ux.x * dx + uy.x * dy
-                    let y = videoCenter.y + ux.y * dx + uy.y * dy
-                    corners.append(CGPoint(x: x, y: y))
-                }
-                path.move(to: corners[0])
-                path.addLine(to: corners[1])
-                path.addLine(to: corners[2])
-                path.addLine(to: corners[3])
-                path.closeSubpath()
-            }
-            switch settings.guideStyle {
-            case .horizontal: horizontal(0)
-            case .cross: horizontal(0); vertical(0)
-            case .thirds:
-                horizontal(-videoSize.height / 6); horizontal(videoSize.height / 6)
-                vertical(-videoSize.width / 6); vertical(videoSize.width / 6)
-            case .square:
-                rect(width: min(videoSize.width, videoSize.height) * 0.65,
-                     height: min(videoSize.width, videoSize.height) * 0.65)
-            case .rectangle:
-                rect(width: videoSize.width * 0.7, height: videoSize.height * 0.64)
+            for index in -count...count {
+                let offset = CGFloat(index) * spacing
+                line(CGPoint(x: origin.x + uy.x * offset, y: origin.y + uy.y * offset), ux)
+                line(CGPoint(x: origin.x + ux.x * offset, y: origin.y + ux.y * offset), uy)
             }
             context.stroke(path, with: .color(ScreenColor.color(settings.guideHex).opacity(settings.guideOpacity)),
                            style: StrokeStyle(lineWidth: settings.guideWidth))
         }
+    }
+}
+
+struct EdgeMotionCues: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        Canvas { context, size in
+            let count = Int(model.settings.cueCount.rounded())
+            let radius = CGFloat(model.settings.cueSize)
+            let rx = max(0, size.width / 2 - 18 - radius)
+            let ry = max(0, size.height / 2 - 18 - radius)
+            for index in 0..<max(8, min(40, count)) {
+                let angle = (Double(index) / Double(max(8, min(40, count))) * 360 + model.cuePhase) * .pi / 180
+                let c = cos(angle), s = sin(angle)
+                // A smooth rectangular ring keeps the cues near the screen edges.
+                let x = size.width / 2 + rx * CGFloat((c < 0 ? -1.0 : 1.0) * pow(abs(c), 0.25))
+                let y = size.height / 2 + ry * CGFloat((s < 0 ? -1.0 : 1.0) * pow(abs(s), 0.25))
+                context.fill(Path(ellipseIn: CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)),
+                    with: .color(ScreenColor.color(model.settings.guideHex).opacity(model.settings.cueOpacity)))
+            }
+        }.opacity(1 - model.veilOpacity).allowsHitTesting(false).accessibilityHidden(true)
+    }
+}
+
+struct SoftCurtain: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        Color.black.opacity(model.veilOpacity).allowsHitTesting(false).accessibilityHidden(true)
     }
 }

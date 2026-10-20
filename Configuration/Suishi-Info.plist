@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleIdentifier</key><string>local.fromeyestoscreen.suishi</string>
+    <key>CFBundleName</key><string>随视</string>
+    <key>CFBundleDisplayName</key><string>随视</string>
+    <key>CFBundleExecutable</key><string>Suishi</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>1.0.4</string>
+    <key>CFBundleVersion</key><string>5</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+    <key>NSCameraUsageDescription</key><string>随视仅在你开启头部跟随后，使用摄像头在本机识别头部侧倾。摄像头画面不上传、不保存，不使用麦克风。</string>
+</dict></plist>

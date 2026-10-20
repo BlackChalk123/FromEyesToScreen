@@ -48,6 +48,12 @@ struct EyesToScreenApp: App {
                 Button("校准水平", action: model.calibrate).keyboardShortcut("r").disabled(!model.canCalibrate)
             }
             CommandMenu("观看") {
+                Button("定姿观看预设") { model.applyPreset("pose") }
+                Button("连续跟随预设") { model.applyPreset("continuous") }
+                Divider()
+                Button("手动解锁", action: model.unlockAngle).keyboardShortcut("u").disabled(!model.canUnlockAngle)
+                Button("锁定当前角度", action: model.lockCurrentAngle).keyboardShortcut("k").disabled(model.manualMode)
+                Divider()
                 Button("全屏观看") { model.enterViewing(.fullscreen) }.disabled(!model.hasContent)
                 Button("返回观看室", action: model.leaveViewing).disabled(model.viewingMode == .workbench)
                 Button(model.following ? "冻结角度" : "恢复跟随") { model.following.toggle() }

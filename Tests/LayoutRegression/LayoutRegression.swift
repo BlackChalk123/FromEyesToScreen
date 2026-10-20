@@ -62,7 +62,10 @@ private final class RegressionDelegate: NSObject, NSApplicationDelegate {
                   "Login and player must share a website data store")
         try check(loginConfiguration.applicationNameForUserAgent?.contains("Version/") == true,
                   "Official website requires a desktop browser version token")
-        model = AppModel(settings: AppSettings(defaults: UserDefaults(suiteName: preferencesDomain)!))
+        let fixtureConfiguration = BilibiliWebConfiguration.make(dataStore: store)
+        fixtureConfiguration.mediaTypesRequiringUserActionForPlayback = []
+        model = AppModel(settings: AppSettings(defaults: UserDefaults(suiteName: preferencesDomain)!),
+                         webPlayer: WebPlayerController(configuration: fixtureConfiguration))
         let model = model!
         model.settings.videoScale = 0.6
         model.settings.fullscreenScale = 0.6
@@ -89,6 +92,7 @@ private final class RegressionDelegate: NSObject, NSApplicationDelegate {
             try await tick()
         }
         try check(model.videoURL != nil, "Bundled local video failed to load")
+        try await exerciseComfort()
         try await rotationStorm()
         try await modeStorm(checkWeb: false)
 
@@ -101,7 +105,7 @@ private final class RegressionDelegate: NSObject, NSApplicationDelegate {
         model.webPlayer.webView.loadHTMLString("""
         <html><head><style>html,body {margin:0;width:100%;height:100%;background:#13242a;color:white}
         video {width:100%;height:100%;object-fit:contain} #clock{position:absolute;top:20px;left:20px}</style></head>
-        <body><h1 id='outside-player'>Outside player fixture</h1><div id='bilibili-player'><div class='bpx-player-container'><video id='video' muted controls src='data:video/mp4;base64,\(videoData)'></video><div id='clock'></div></div></div>
+        <body><h1 id='outside-player'>Outside player fixture</h1><div id='bilibili-player'><div class='bpx-player-container'><video id='video' autoplay loop muted controls src='data:video/mp4;base64,\(videoData)'></video><div id='clock'></div></div></div>
         <script>window.__layoutRegressionToken='preserved';setInterval(()=>{document.querySelector('#clock').textContent=performance.now().toFixed(0)},16)</script>
         </body></html>
         """, baseURL: URL(string: "https://www.bilibili.com/video/BV1B7411m7LV/"))
@@ -114,6 +118,7 @@ private final class RegressionDelegate: NSObject, NSApplicationDelegate {
         try check(playerOnly == true, "Desktop website player layout did not activate")
         let outsideVisibility = try await model.webPlayer.webView.evaluateJavaScript("getComputedStyle(document.querySelector('#outside-player')).visibility") as? String
         try check(outsideVisibility == "hidden", "Website content outside the player should be hidden")
+        try await exerciseWebCurtain()
         try await rotationStorm()
         try await modeStorm(checkWeb: true)
         for _ in 0..<6 {
@@ -124,6 +129,37 @@ private final class RegressionDelegate: NSObject, NSApplicationDelegate {
         }
         try await checkWebDocument()
         model.shutdown()
+    }
+
+    private func exerciseComfort() async throws {
+        model.settings.rotationLimit = 90
+        model.settings.curtainInterval = 0.5
+        model.setManualAngle(0)
+        for _ in 0..<150 { try await tick() }
+        model.seek(to: 0)
+        model.player.play()
+        for _ in 0..<30 { try await tick() }
+        let item = model.player.currentItem
+        let before = model.player.currentTime().seconds
+        model.setManualAngle(60)
+        var sawCovered = false
+        var previousAngle = model.displayAngle
+        for _ in 0..<350 {
+            try await tick()
+            if model.veilOpacity >= 0.99 { sawCovered = true }
+            if abs(model.displayAngle - previousAngle) > 10 {
+                try check(model.veilOpacity >= 0.99, "A large turn must be hidden behind the curtain")
+            }
+            previousAngle = model.displayAngle
+            if sawCovered && model.transitionPhase == .visible && abs(model.displayAngle - 56) < 0.2 { break }
+        }
+        try check(sawCovered && model.veilOpacity < 0.01, "Curtain did not complete and recover")
+        try check(abs(model.displayAngle - 56) < 0.2, "60 degrees should reveal at the compensated 56 degrees")
+        try check(model.player.currentItem === item && model.player.currentTime().seconds > before + 0.1,
+                  "Video playback must continue through the curtain")
+        model.settings.curtainEnabled = false
+        model.settings.rotationLimit = 45
+        model.setManualAngle(0)
     }
 
     private func rotationStorm() async throws {
@@ -137,13 +173,42 @@ private final class RegressionDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func exerciseWebCurtain() async throws {
+        model.settings.curtainEnabled = false
+        model.setManualAngle(0)
+        for _ in 0..<200 { try await tick() }
+        model.settings.rotationLimit = 90
+        model.settings.curtainEnabled = true
+        model.settings.curtainInterval = 0.5
+        _ = try await model.webPlayer.webView.callAsyncJavaScript("await document.querySelector('video').play(); return true;",
+            arguments: [:], in: nil, contentWorld: .page)
+        let before = try await model.webPlayer.webView.evaluateJavaScript("document.querySelector('video').currentTime") as! Double
+        model.setManualAngle(-60)
+        var sawCovered = false
+        for _ in 0..<400 {
+            try await tick()
+            if model.veilOpacity >= 0.99 { sawCovered = true }
+            if sawCovered && model.transitionPhase == .visible { break }
+        }
+        try check(sawCovered && model.veilOpacity == 0, "Web curtain did not recover")
+        let after = try await model.webPlayer.webView.evaluateJavaScript("document.querySelector('video').currentTime") as! Double
+        let paused = try await model.webPlayer.webView.evaluateJavaScript("document.querySelector('video').paused") as! Bool
+        try check(!paused && after > before + 0.1, "Web video must keep playing through an opaque curtain")
+        try await checkWebDocument()
+        model.settings.curtainEnabled = false
+        model.settings.rotationLimit = 45
+        model.setManualAngle(0)
+    }
+
     private func modeStorm(checkWeb: Bool) async throws {
         for index in 0..<24 {
             for transparent in [false, true] {
                 let mode = ViewingMode.fullscreen
                 model.settings.transparentBackground = transparent
                 model.settings.guides = true
-                model.settings.guideStyle = GuideStyle.allCases[index % GuideStyle.allCases.count]
+                model.settings.gridSpacing = Double(24 + (index % 5) * 24)
+                model.settings.gridFollowsVideo = index % 2 == 0
+                model.settings.cuesEnabled = index % 2 == 0
                 model.settings.guideOutsideOnly = index % 2 == 0
                 model.settings.backgroundOpacity = index % 2 == 0 ? 0.5 : 1
                 model.settings.backgroundBlur = Double(index % 3) * 5
